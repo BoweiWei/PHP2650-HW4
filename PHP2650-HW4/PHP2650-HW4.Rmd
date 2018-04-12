@@ -1,0 +1,123 @@
+---
+title: "PHP2650-HW4"
+author: "Bowei Wei"
+date: "4/11/2018"
+output: html_document
+---
+
+In class, we covered different algorithms to solve the lasso penalized linearregression problem for !observations:min%&'%(=12!∥-−/%∥22+1∥%∥1.Like the notations used in class, ∥3∥22=∑5352and ∥3∥1=∑5∣35∣.With the skills that you learned in class, you can solve many other machine learningproblems that you may encounter in future. In this assignment, you will developoptimization algorithms to solve a new and related penalized regression problem,commonly referred to as Elastic Net (EN):min%78%9=12!∥-−/%∥22+1:;∥%∥1+12'1−;(∥%∥22<.When ;=1, this reduces to the lasso regression problem. When ;=0, this reducesto the ridge regression. A typical choice for EN is ;=0.95. The intuition of havingthe ℓ2term or the ridge penalty is to increase the stability of regression, especiallywhen the predictors are highly correlated or /A/is not invertible as a result. Wediscussed in class that the ridge regression formula involves of inverting /A/+BCinstead.Develop a algorithm for solving the EN problem, with the input /,1,;. Implementyour algorithm in your preferred programming language. You may stop theiterations when the updates between iterations are smaller than 10−4. We will usesimulated data to test your algorithm becuase we can construct input data underdifferent settings easily. The data for -and /are available on Canvas.
+
+1. Run your algoirthm on the input data with ;=0.95(the EN choice), and1=0.01,0.1,1,10. Collect the %estimates by your algorithm as a matrix of F×4, where Fis the dimension of %and we expect 4%column vectorscorresponding to the 41values. Your function/script should save the matrix asa csv file b1.csv.
+
+Note: you may want to consider different approaches and implementations thatwe introduced in class to improve the computational efficiency of your
+3/25/18, 11)33 AMStat Method for Big Data: Homework 4Page 3 of 3file:///Users/xluo/Dropbox/StatLearnBigData_2018/Hw4_Optimization/HW04v2ElasticNet.htmlalgorithm. You may also compare the output from your algorithm with glmnetfor the purpose of debugging. Be aware that existing packages under thedefault options (e.g. standardization, intercepts) may solve a slightly differentproblem than the EN objective here. You might need to adjust the options toget existing packages to solve exactly this problem. Using an existing packagefor EN developed by others is not considered sufficient for answering thisquestion.
+```{r}
+## Input the test data
+X.test <- read.csv("X.csv", header = FALSE, sep = ",")
+X.test <- as.matrix(X.test)
+Y.test <- read.csv("Y.csv", header = FALSE, sep = ",")
+Y.test <- as.matrix(Y.test)
+## Algorithm for EN
+admmEN <- function(X, lambda, a, maxit = 1000, tol=1e-4) {
+    XX <- t(X) %*% X
+    Xy <- t(X) %*% y
+
+    p <- ncol(X)
+    lambda <- rep(0, p)
+    maxRho <- 5
+    rho <- 4
+
+    z0 <- z <- beta0 <- beta <- rep(0, p)
+    Sinv <- solve(XX + rho*diag(rep(1, p)) )
+
+    for (it in 1:maxit) {
+        ## update beta
+        ## beta <- solve(XX + rho*diag(rep(1, p)) ) %*% (Xy + rho * z - lambda)
+        beta <- Sinv %*% (Xy + rho * z - lambda)
+        
+        ## update z
+        z <- softThresh(beta + lambda/rho, tau/rho)
+        ## update lambda
+        lambda <- lambda + rho* (beta - z ) 
+        ## increase rho
+        ## rho <- min(maxRho, rho*1.1)
+        
+        change <- max(  c( base::norm(beta - beta0, "F"),
+                      base::norm(z - z0, "F") ) )
+        if (change < tol || it > maxit) {
+            break
+        }
+        beta0 <-  beta
+        z0 <-  z
+
+    }
+    z
+}
+
+## cd lasso change to cd EN
+soft_thresholding <- function(x,a){
+    ## This could be done more efficiently using vector multiplication
+    ## See the forumula in slides
+    ##  sign(x)*pmax(abs(x) - a, 0)
+    result <- numeric(length(x))
+    result[which(x > a)] <- x[which(x > a)] - a
+    result[which(x < -a)] <- x[which(x < -a)] + a
+    return(result)
+}
+
+
+
+lasso_kkt_check <- function(X,y,beta,lambda, tol=1e-3){
+    ## check convergence 
+    beta <- as.matrix(beta); X <- as.matrix(X)
+    ## Assuming no intercepts 
+    G <- t(X)%*%(y-X%*%beta)/length(y)
+    ix <- which(beta == 0 )
+    iy <- which(beta != 0)
+    if (any(abs(G[ix]) > (lambda + tol) )) { return(pass=0) }
+    if (any(abs( G[iy] - lambda*sign(beta[iy] ) ) > tol)) { return(pass=0) }  
+    return(pass=1)
+}
+
+
+
+EN.cd <- function(X,y,a,beta,lambda,tol=1e-6,maxiter=1000,quiet=FALSE){
+    # note that the LS part  in this function is the one in slides divided by length(y) = n 
+    ## Or equivalently  lambda here = n * lambda in class
+    beta <- as.matrix(beta); X <- as.matrix(X)
+    obj <- numeric(length=(maxiter+1))
+    betalist <- list(length=(maxiter+1))
+    betalist[[1]] <- beta
+
+    for (j in 1:maxiter){
+        for (k in 1:length(beta)){
+            r <- y - X[,-k]%*%beta[-k]
+            beta[k] <- (1/(a*norm(as.matrix(X[,k]),"F")^2+sum(abs(beta))))*soft_thresholding(t(r)%*%X[,k],length(y)*lambda)
+        }
+        betalist[[(j+1)]] <- beta
+        obj[j] <- (1/2)*(1/length(y))*norm(y - X%*%beta,"F")^2 + lambda*(a*sum(abs(beta))+ (1-a)*(norm(beta,"F")^2)/2)
+        if (norm(betalist[[j]] - beta,"F") < tol) { break }
+    }
+    check <- lasso_kkt_check(X,y,beta,lambda) 
+
+    if (quiet==FALSE){
+        if (check==1) {
+            cat(noquote("Minimum obtained.\n"))
+        }
+      else { cat(noquote("Minimum not obtained.\n")) } 
+    }
+    return(list(obj=obj[1:j],beta=beta)) 
+}
+
+
+file.EN <- EN.cd(X.test, Y.test, 0.95, rep(0.1,400), 1)
+file.lasso <- lasso.cd(X.test, Y.test, rep(0, 400), 1) 
+
+library(glmnet)
+gnet <- glmnet(X.test, Y.test, alpha = 1, lambda = 0.1)
+gnet$beta
+idx2 = which(gnet$beta != 0)
+idx = which(file.EN$beta != 0)
+file.EN$beta[idx]
+```
+2. Redo question 1 using a different ;=1(the lasso choice), and save the outputas b2.csv.
